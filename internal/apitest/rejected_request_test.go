@@ -81,12 +81,7 @@ func TestRejectedRequests(t *testing.T) {
 				t.Errorf("code = %s, want %s", got.Error.Code, tt.wantCode)
 			}
 			for _, wallet := range []string{from, to} {
-				if n := transferCount(t, wallet); n != 0 {
-					t.Errorf("%d transfers stored for %s, want none", n, wallet)
-				}
-				if balance := balanceOf(t, wallet); balance != 1000 {
-					t.Errorf("balance of %s = %d, want 1000", wallet, balance)
-				}
+				assertUntouched(t, wallet, 1000)
 			}
 		})
 	}
