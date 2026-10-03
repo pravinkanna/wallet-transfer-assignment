@@ -39,6 +39,9 @@ func TestRejectedRequests(t *testing.T) {
 		{"idempotencyKey too long", `{"idempotencyKey":"$LONG","fromWalletId":"$FROM","toWalletId":"$TO","amount":100}`, "INVALID_FIELD"},
 		{"idempotencyKey is a number", `{"idempotencyKey":123,"fromWalletId":"$FROM","toWalletId":"$TO","amount":100}`, "INVALID_FIELD"},
 		{"fromWalletId is an object", `{"idempotencyKey":"$KEY","fromWalletId":{},"toWalletId":"$TO","amount":100}`, "INVALID_FIELD"},
+		{"NUL in idempotencyKey", `{"idempotencyKey":"$KEY\u0000","fromWalletId":"$FROM","toWalletId":"$TO","amount":100}`, "INVALID_FIELD"},
+		{"NUL in fromWalletId", `{"idempotencyKey":"$KEY","fromWalletId":"$FROM\u0000","toWalletId":"$TO","amount":100}`, "INVALID_FIELD"},
+		{"NUL in toWalletId", `{"idempotencyKey":"$KEY","fromWalletId":"$FROM","toWalletId":"$TO\u0000","amount":100}`, "INVALID_FIELD"},
 		{"missing amount", `{"idempotencyKey":"$KEY","fromWalletId":"$FROM","toWalletId":"$TO"}`, "INVALID_FIELD"},
 		{"null amount", `{"idempotencyKey":"$KEY","fromWalletId":"$FROM","toWalletId":"$TO","amount":null}`, "INVALID_FIELD"},
 

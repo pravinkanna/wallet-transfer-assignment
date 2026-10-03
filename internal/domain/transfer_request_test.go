@@ -64,6 +64,9 @@ func TestNewTransferRequestRejectsInvalidInput(t *testing.T) {
 		{"fromWalletId too long", "key-1", tooLong, "wallet_2", "100", domain.ErrInvalidField},
 		{"toWalletId too long", "key-1", "wallet_1", tooLong, "100", domain.ErrInvalidField},
 		{"256 multibyte characters", tooLongMultibyte, "wallet_1", "wallet_2", "100", domain.ErrInvalidField},
+		{"NUL in idempotencyKey", "key-\x00", "wallet_1", "wallet_2", "100", domain.ErrInvalidField},
+		{"NUL in fromWalletId", "key-1", "wallet\x00_1", "wallet_2", "100", domain.ErrInvalidField},
+		{"NUL in toWalletId", "key-1", "wallet_1", "wallet\x00_2", "100", domain.ErrInvalidField},
 
 		// Step 4: amount is a JSON integer from 1 to int64 max.
 		{"amount as a string", "key-1", "wallet_1", "wallet_2", `"100"`, domain.ErrInvalidAmount},
