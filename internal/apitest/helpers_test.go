@@ -132,6 +132,18 @@ func transferCount(t *testing.T, walletID string) int {
 	return count
 }
 
+// assertUntouched fails t if any transfer involves the wallet or its balance
+// is not wantBalance.
+func assertUntouched(t *testing.T, walletID string, wantBalance int64) {
+	t.Helper()
+	if n := transferCount(t, walletID); n != 0 {
+		t.Errorf("%d transfers stored for %s, want none", n, walletID)
+	}
+	if balance := balanceOf(t, walletID); balance != wantBalance {
+		t.Errorf("balance of %s = %d, want %d", walletID, balance, wantBalance)
+	}
+}
+
 func balanceOf(t *testing.T, walletID string) int64 {
 	t.Helper()
 	var balance int64

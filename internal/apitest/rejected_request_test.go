@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestRejectedRequests(t *testing.T) {
@@ -85,6 +87,42 @@ func TestRejectedRequests(t *testing.T) {
 				if balance := balanceOf(t, wallet); balance != 1000 {
 					t.Errorf("balance of %s = %d, want 1000", wallet, balance)
 				}
+			}
+		})
+	}
+}
+
+func TestUnknownWallet(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                   string
+		unknownFrom, unknownTo bool
+	}{
+		{"unknown source", true, false},
+		{"unknown destination", false, true},
+		{"both unknown", true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			beginTest(t)
+			wallets := []string{createWallet(t, 1000), createWallet(t, 1000)}
+			from, to := wallets[0], wallets[1]
+			if tt.unknownFrom {
+				from = "wallet-unknown-" + uuid.NewString()
+			}
+			if tt.unknownTo {
+				to = "wallet-unknown-" + uuid.NewString()
+			}
+
+			got := postTransfer(t, transferBody(newKey(), from, to, 100)).errorBody(t, http.StatusBadRequest)
+
+			if got.Error.Code != "WALLET_NOT_FOUND" {
+				t.Errorf("code = %s, want WALLET_NOT_FOUND", got.Error.Code)
+			}
+			for _, wallet := range wallets {
+				assertUntouched(t, wallet, 1000)
 			}
 		})
 	}
