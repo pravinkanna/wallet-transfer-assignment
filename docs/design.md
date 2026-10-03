@@ -527,7 +527,7 @@ errors to the handler.
 | Package            | Kind | Covers |
 |--------------------|------|--------|
 | `internal/domain`  | Unit, table-driven | Validation rules (spec §6 steps 3–5), state transitions |
-| `internal/apitest` | API: HTTP → handler → service → repository → embedded Postgres | Everything else, asserted against the spec: status codes, bodies, and database state |
+| `internal/apitest` | API: HTTP → handler → service → repository → embedded Postgres | Everything else, asserted against the spec: status codes, bodies, and database state; also the startup schema and seed, applied as `cmd/server` applies them |
 
 There are no mocks. API tests run the real layers, so they test the contract
 rather than internals.
@@ -550,6 +550,7 @@ rather than internals.
 | Idempotency | Replaying a `PROCESSED` or `FAILED` transfer returns the identical response and adds no rows; different body → `409`; a rejected request does not use up its key; replay after restarting the service (new pool, same database) |
 | Concurrency | 50 concurrent debits of 100 from a wallet holding 1000 → exactly 10 `PROCESSED`, balance 0; transfers in both directions between two wallets → no deadlock; 20 concurrent requests with one key → one transfer, 20 identical responses |
 | Observability | One log line per request with the §10 fields: `201` → `INFO` with `idempotencyKey`, `transferId`, `state`, `status`; `500` → `ERROR` with `idempotencyKey`, `status`, `error` |
+| Startup | Applying the schema and seed twice succeeds; the seed wallets have their §4 opening balances; applying both again after a transfer leaves every balance unchanged |
 
 ### Workflow
 
