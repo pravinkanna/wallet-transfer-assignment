@@ -37,7 +37,7 @@ Checks before every commit:
 | P-1 | Slice by layer or by behavior? | By behavior. Design §11 has only domain unit tests and API tests, so a repository or service slice would have no failing test of its own. |
 | P-2 | How does a Red commit fail? | On assertions. Empty stubs keep every commit building and lint-clean. |
 | P-3 | Design §3 says the service defines the repository interfaces, the repository does not import the service, and `InTx` passes a transaction-scoped repository to `fn`. A Go method `InTx(ctx, func(service.Tx) error)` would force that import. | A generic constructor in the service adapts the repository's `InTx(ctx, func(*repository.Tx) error)`. Go infers `T`, so wiring is `service.New(repository.New(pool))`. §3 holds as written. |
-| P-4 | Design §11 has no test for logging, the request deadline, server timeouts, shutdown, or startup schema and seed. | Logging gets a Red test (slice 10), added to §11 in its own doc commit first. The rest is wiring and lands without a test. |
+| P-4 | Design §11 has no test for logging, the request deadline, server timeouts, shutdown, or startup schema and seed. | Logging gets a Red test (slice 10), added to §11 in its own doc commit first. The rest is wiring and lands without a test; after the PR review, slice 15 added a test for the startup schema and seed. |
 | P-5 | When are wallets locked? | From slice 8. Slices 3–7 read the balance without a lock, the smallest code their tests need. Slice 8's tests fail against that, and the ordered locks fix them. |
 | P-6 | Where does `schema.sql` land in slice 3? | In the Red commit: the test harness cannot create wallets without the tables. |
 | P-7 | Design §5 writes both ledger entries in one statement and has one fixed-state `UPDATE` per outcome. | `Transfer.LedgerEntries()` builds the pair in the domain, and the repository inserts one row per entry. One `UpdateTransferState` keeps the `AND state = 'PENDING'` guard. |
@@ -80,6 +80,9 @@ func New[T Tx](repo Repository[T]) *TransferService
 | 10 | Logging | One JSON log line per request with the design §10 fields, for a `201` and a `500` | `slog` line in the handler |
 | 11 | Server wiring | — | 5 s request deadline; `seed.sql`; `cmd/server` (config, pool, schema and seed, server timeouts, graceful shutdown); `compose.yaml` |
 | 12 | README | — | How to run, how to test, links to the docs |
+| 13 | Body size limit (PR review) | Exactly 64 KiB → `201`; one byte over, padded inside or after the object → `413 REQUEST_TOO_LARGE`; over the limit and not JSON → `413` | Body read whole through `http.MaxBytesReader`, then decoded, so the size check comes first |
+| 14 | NUL in string fields (PR review) | NUL in each string field → `ErrInvalidField` (domain) and `400 INVALID_FIELD` (API), not `500` | Domain rejects U+0000 |
+| 15 | Startup schema and seed (PR review) | — (passes on arrival; shown to fail against a seed that resets balances and a schema without `IF NOT EXISTS`) | Test only |
 
 Notes:
 
@@ -88,6 +91,8 @@ Notes:
 - Slice 8: the Red depends on timing. Without locks, overdrafts hit
   `CHECK (balance >= 0)` and opposite-direction transfers deadlock, both
   returning `500`; with 50 concurrent requests this should fail reliably.
+- Slices 13–15 answer the Copilot review on PR #195. Each starts with a doc
+  commit: requirements D-19 and D-20, the API spec, and design §5, §9, §11.
 
 **Done when** every scenario in design §11 has a test, the three checks in §1
 pass, and the README is updated.
@@ -111,16 +116,21 @@ As committed, oldest first.
 | 10 | `Add logging scenario to design test strategy` → `Add failing test for the request log line` → `Log one line per transfer request` |
 | 11 | `Add 5 s request deadline` → `Add seed data and server entrypoint` → `Add Docker Compose for local Postgres` |
 | 12 | `Update README with run and test instructions` |
+| 13 | `Add 64 KiB request body limit to the docs` → `Add failing tests for the request body limit` → `Reject request bodies over 64 KiB` |
+| 14 | `Reject NUL characters in string fields in the docs` → `Add failing tests for NUL characters in string fields` → `Reject NUL characters in string fields` |
+| 15 | `Add startup schema and seed scenario to design test strategy` → `Test that startup schema and seed are safe to reapply` |
 
 ## 6. Questions Resolved During Implementation
 
 | Slice | Question | Decision |
 |-------|----------|----------|
 | 4  | Duplicate JSON keys | Left as is: `encoding/json` keeps the last value |
-| 4  | `\u0000` in a string field | Left as is: Postgres rejects it → `500` |
-| 4  | Request body size | No limit |
+| 4  | `\u0000` in a string field | Left as is at first; slice 14 rejects it as `INVALID_FIELD` |
+| 4  | Request body size | No limit at first; slice 13 caps it at 64 KiB |
 | 4  | Unknown paths and methods | Left as is: `ServeMux` plain-text `404` / `405` |
 | 11 | `DATABASE_URL` unset | The server exits with an error |
 | 11 | Where the 5 s request deadline is set | In the handler |
 | 11 | Compose Postgres | `postgres:16-alpine` on port 5432, database `wallet` |
 | 12 | README | Solution section on top; the template's text kept below |
+| 13 | Response to an oversized body | `413 REQUEST_TOO_LARGE`, checked before `INVALID_JSON` |
+| 13 | Body size limit | 64 KiB, over 10× the largest valid request |
