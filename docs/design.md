@@ -291,7 +291,7 @@ WHERE idempotency_key = $1;
 
 Same `from_wallet_id`, `to_wallet_id`, and `amount` → replay that transfer.
 Anything different → `IDEMPOTENCY_KEY_REUSED`. Either way the transaction
-rolls back, having written nothing.
+writes nothing.
 
 **Lock the wallets** (steps 7–8), one statement per wallet, lower ID first
 (§7):
