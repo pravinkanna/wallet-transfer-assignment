@@ -1,6 +1,9 @@
 package domain
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // TransferState is where a transfer is in its lifecycle. PROCESSED and FAILED
 // are final.
@@ -27,15 +30,31 @@ type Transfer struct {
 
 // NewTransfer creates a PENDING transfer for a validated request.
 func NewTransfer(id string, req TransferRequest) Transfer {
-	return Transfer{}
+	return Transfer{
+		ID:             id,
+		IdempotencyKey: req.IdempotencyKey,
+		FromWalletID:   req.FromWalletID,
+		ToWalletID:     req.ToWalletID,
+		Amount:         req.Amount,
+		State:          StatePending,
+	}
 }
 
 // MarkProcessed moves a PENDING transfer to PROCESSED.
 func (t *Transfer) MarkProcessed() error {
-	return nil
+	return t.moveTo(StateProcessed)
 }
 
 // MarkFailed moves a PENDING transfer to FAILED.
 func (t *Transfer) MarkFailed() error {
+	return t.moveTo(StateFailed)
+}
+
+// moveTo allows only PENDING -> PROCESSED and PENDING -> FAILED.
+func (t *Transfer) moveTo(next TransferState) error {
+	if t.State != StatePending {
+		return fmt.Errorf("%w: %s to %s", ErrInvalidTransition, t.State, next)
+	}
+	t.State = next
 	return nil
 }
