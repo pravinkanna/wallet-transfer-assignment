@@ -39,21 +39,43 @@ func (r *Repository) InTx(ctx context.Context, fn func(*Tx) error) error {
 // that does not exist.
 const foreignKeyViolation = "23503"
 
-// InsertTransfer stores a new transfer as PENDING. It returns
-// domain.ErrWalletNotFound if either wallet does not exist.
-func (t *Tx) InsertTransfer(ctx context.Context, transfer domain.Transfer) error {
-	_, err := t.tx.Exec(ctx, `
+// InsertTransfer stores a new transfer as PENDING, claiming its idempotency
+// key. It returns false if a transfer already holds the key; if a transaction
+// that holds the key is still running, it first waits for that transaction
+// to end. It returns domain.ErrWalletNotFound if either wallet does not exist.
+func (t *Tx) InsertTransfer(ctx context.Context, transfer domain.Transfer) (bool, error) {
+	var id string
+	err := t.tx.QueryRow(ctx, `
 		INSERT INTO transfers (id, idempotency_key, from_wallet_id, to_wallet_id, amount, state)
-		VALUES ($1, $2, $3, $4, $5, 'PENDING')`,
-		transfer.ID, transfer.IdempotencyKey, transfer.FromWalletID, transfer.ToWalletID, transfer.Amount)
+		VALUES ($1, $2, $3, $4, $5, 'PENDING')
+		ON CONFLICT (idempotency_key) DO NOTHING
+		RETURNING id`,
+		transfer.ID, transfer.IdempotencyKey, transfer.FromWalletID, transfer.ToWalletID, transfer.Amount,
+	).Scan(&id)
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation {
-		return domain.ErrWalletNotFound
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return false, nil
+	case errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation:
+		return false, domain.ErrWalletNotFound
+	case err != nil:
+		return false, fmt.Errorf("insert transfer: %w", err)
 	}
+	return true, nil
+}
+
+// FindTransferByKey reads the transfer that holds an idempotency key.
+func (t *Tx) FindTransferByKey(ctx context.Context, key string) (domain.Transfer, error) {
+	transfer := domain.Transfer{IdempotencyKey: key}
+	err := t.tx.QueryRow(ctx, `
+		SELECT id, from_wallet_id, to_wallet_id, amount, state
+		FROM transfers
+		WHERE idempotency_key = $1`, key,
+	).Scan(&transfer.ID, &transfer.FromWalletID, &transfer.ToWalletID, &transfer.Amount, &transfer.State)
 	if err != nil {
-		return fmt.Errorf("insert transfer: %w", err)
+		return domain.Transfer{}, fmt.Errorf("find transfer by key: %w", err)
 	}
-	return nil
+	return transfer, nil
 }
 
 // GetWallet reads a wallet.

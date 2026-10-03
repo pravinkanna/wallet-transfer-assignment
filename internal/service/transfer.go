@@ -11,7 +11,8 @@ import (
 
 // Tx is the transaction-scoped repository the transfer workflow runs on.
 type Tx interface {
-	InsertTransfer(ctx context.Context, transfer domain.Transfer) error
+	InsertTransfer(ctx context.Context, transfer domain.Transfer) (bool, error)
+	FindTransferByKey(ctx context.Context, key string) (domain.Transfer, error)
 	GetWallet(ctx context.Context, walletID string) (domain.Wallet, error)
 	DebitWallet(ctx context.Context, walletID string, amount int64) error
 	CreditWallet(ctx context.Context, walletID string, amount int64) error
@@ -51,9 +52,23 @@ func (s *TransferService) Transfer(ctx context.Context, req domain.TransferReque
 	transfer := domain.NewTransfer(id.String(), req)
 
 	err = s.inTx(ctx, func(tx Tx) error {
-		if err := tx.InsertTransfer(ctx, transfer); err != nil {
+		inserted, err := tx.InsertTransfer(ctx, transfer)
+		if err != nil {
 			return err
 		}
+		if !inserted {
+			// The key is taken: replay its transfer if the body is the same.
+			existing, err := tx.FindTransferByKey(ctx, req.IdempotencyKey)
+			if err != nil {
+				return err
+			}
+			if !existing.Matches(req) {
+				return domain.ErrIdempotencyKeyReused
+			}
+			transfer = existing
+			return nil
+		}
+
 		source, err := tx.GetWallet(ctx, transfer.FromWalletID)
 		if err != nil {
 			return err

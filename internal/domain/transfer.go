@@ -40,6 +40,14 @@ func NewTransfer(id string, req TransferRequest) Transfer {
 	}
 }
 
+// Matches reports whether req has the same body as the request that created
+// t: the same wallets and amount (spec §5).
+func (t Transfer) Matches(req TransferRequest) bool {
+	return t.FromWalletID == req.FromWalletID &&
+		t.ToWalletID == req.ToWalletID &&
+		t.Amount == req.Amount
+}
+
 // MarkProcessed moves a PENDING transfer to PROCESSED.
 func (t *Transfer) MarkProcessed() error {
 	return t.moveTo(StateProcessed)
