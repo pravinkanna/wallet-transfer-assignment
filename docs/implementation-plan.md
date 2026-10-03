@@ -36,16 +36,22 @@ Checks before every commit:
 |-----|----------|----------|
 | P-1 | Slice by layer or by behavior? | By behavior. Design §11 has only domain unit tests and API tests, so a repository or service slice would have no failing test of its own. |
 | P-2 | How does a Red commit fail? | On assertions. Empty stubs keep every commit building and lint-clean. |
-| P-3 | Design §3 says the service defines the repository interfaces, the repository does not import the service, and `InTx` passes a transaction-scoped repository to `fn`. A Go method `InTx(ctx, func(service.Tx) error)` would force that import. | A generic constructor in the service adapts the repository's `InTx(ctx, func(*repository.Tx) error)`. Wiring calls `service.New[*repository.Tx](repo)`. §3 holds as written. |
+| P-3 | Design §3 says the service defines the repository interfaces, the repository does not import the service, and `InTx` passes a transaction-scoped repository to `fn`. A Go method `InTx(ctx, func(service.Tx) error)` would force that import. | A generic constructor in the service adapts the repository's `InTx(ctx, func(*repository.Tx) error)`. Go infers `T`, so wiring is `service.New(repository.New(pool))`. §3 holds as written. |
 | P-4 | Design §11 has no test for logging, the request deadline, server timeouts, shutdown, or startup schema and seed. | Logging gets a Red test (slice 10), added to §11 in its own doc commit first. The rest is wiring and lands without a test. |
 | P-5 | When are wallets locked? | From slice 8. Slices 3–7 read the balance without a lock, the smallest code their tests need. Slice 8's tests fail against that, and the ordered locks fix them. |
+| P-6 | Where does `schema.sql` land in slice 3? | In the Red commit: the test harness cannot create wallets without the tables. |
+| P-7 | Design §5 writes both ledger entries in one statement and has one fixed-state `UPDATE` per outcome. | `Transfer.LedgerEntries()` builds the pair in the domain, and the repository inserts one row per entry. One `UpdateTransferState` keeps the `AND state = 'PENDING'` guard. |
+| P-8 | A replay ends its transaction with a commit that writes nothing, not a rollback. | Kept; design §5 now says "writes nothing". |
+| P-9 | When is `idempotencyKey` logged (design §10)? | When the request passed spec §6 steps 1–5; a `400` from those steps logs no key. |
+| P-10 | `go test ./... -cover` shows 0% for `handler`, `service`, and `repository`. | Expected: the API tests are another package. The README gives `-coverpkg=./internal/...`. |
+| P-11 | Embedded Postgres unpacked its binaries on every run (~45 s under `-race`). | They unpack once into `~/.embedded-postgres-go/binaries-16.9.0`. |
 
 P-3 in code:
 
 ```go
 // The repository's InTx passes its own transaction type T, so it
 // never has to import this package.
-func New[T Tx](repo TxRunner[T]) *TransferService
+func New[T Tx](repo Repository[T]) *TransferService
 ```
 
 ## 3. Toolchain
@@ -62,9 +68,9 @@ func New[T Tx](repo TxRunner[T]) *TransferService
 
 | #  | Behavior | Red | Blue |
 |----|----------|-----|------|
-| 1  | Request validation (domain) | Table tests for `domain.NewTransferRequest`: `INVALID_FIELD` per field, in spec order; `INVALID_AMOUNT` for `"100"`, `100.5`, `100.0`, `1e2`, `0`, `-1`, int64 max + 1; `SAME_WALLET`; a valid request | `go.mod`; validation rules and domain errors |
+| 1  | Request validation (domain) | Table tests for `domain.NewTransferRequest`: `INVALID_FIELD` per field, in spec order; `INVALID_AMOUNT` for `"100"`, `100.5`, `100.0`, `1e2`, `0`, `-1`, int64 max + 1; `SAME_WALLET`; a valid request | Validation rules and domain errors |
 | 2  | State transitions (domain) | `MarkProcessed` and `MarkFailed` succeed from `PENDING` and fail from `PROCESSED` or `FAILED` | `Transfer` with guarded transitions |
-| 3  | Successful transfer | API harness: `TestMain` starts embedded Postgres and applies `schema.sql`; helpers create wallets with unique IDs and check invariants 5–10 after each test. Tests: sufficient funds → `201 PROCESSED`, balances moved, two ledger entries; amount equal to the balance → balance 0 | `schema.sql`; repository with `InTx`; service workflow; handler decode and encode |
+| 3  | Successful transfer | API harness and `schema.sql` (P-6): `TestMain` starts embedded Postgres and applies the schema; helpers create wallets with unique IDs and check invariants 5–10 after each test. Tests: sufficient funds → `201 PROCESSED`, balances moved, two ledger entries; amount equal to the balance → balance 0 | Repository with `InTx`; service workflow; handler decode and encode |
 | 4  | Rejected requests | Each `400` code in spec §4; check order (missing field + bad amount → `INVALID_FIELD`); error body shape; nothing stored | Handler checks for spec §6 steps 1–2; error mapping |
 | 5  | Unknown wallet | `400 WALLET_NOT_FOUND`; nothing stored | Foreign-key violation `23503` mapped to a domain error |
 | 6  | Insufficient funds | `422 FAILED`; no entries; balances unchanged | `FAILED` path |
@@ -86,35 +92,35 @@ Notes:
 **Done when** every scenario in design §11 has a test, the three checks in §1
 pass, and the README is updated.
 
-## 5. Planned Commits
+## 5. Commits
 
-Messages are drafts; each is shown again before committing.
+As committed, oldest first.
 
 | Slice | Commits |
 |-------|---------|
-| —  | `Add implementation plan` |
+| —  | `Add implementation plan` → `Initialize Go module` |
 | 1  | `Add failing tests for transfer request validation` → `Validate transfer requests in the domain` |
 | 2  | `Add failing tests for transfer state transitions` → `Guard transfer state transitions` |
-| 3  | `Add API test harness and failing test for a successful transfer` → `Process a successful transfer end to end` |
+| 3  | `Add API test harness and failing test for a successful transfer` → `Fix ledger entry order in API test helper` → `Process a successful transfer end to end` |
 | 4  | `Add failing tests for rejected requests` → `Reject invalid requests with spec error codes` |
-| 5  | `Add failing test for unknown wallets` → `Return WALLET_NOT_FOUND for unknown wallets` |
+| 5  | `Add failing test for unknown wallets` → `Return WALLET_NOT_FOUND for unknown wallets` → `Use assertUntouched in rejected request tests` |
 | 6  | `Add failing test for insufficient funds` → `Record FAILED transfers on insufficient funds` |
-| 7  | `Add failing idempotency tests` → `Replay transfers by idempotency key` |
+| 7  | `Add failing idempotency tests` → `Replay transfers by idempotency key` → `Clarify that a replay writes nothing in design doc` |
 | 8  | `Add failing concurrency tests` → `Lock both wallets in ID order before the balance check` |
 | 9  | `Add failing test for database errors` → `Return INTERNAL_ERROR on server errors` |
 | 10 | `Add logging scenario to design test strategy` → `Add failing test for the request log line` → `Log one line per transfer request` |
 | 11 | `Add 5 s request deadline` → `Add seed data and server entrypoint` → `Add Docker Compose for local Postgres` |
 | 12 | `Update README with run and test instructions` |
 
-## 6. Open Questions
+## 6. Questions Resolved During Implementation
 
-Asked when the slice starts.
-
-| Slice | Question | Current behavior if left as is |
-|-------|----------|--------------------------------|
-| 4  | Duplicate JSON keys | `encoding/json` keeps the last value |
-| 4  | `\u0000` in a string field | Postgres rejects it → `500` |
+| Slice | Question | Decision |
+|-------|----------|----------|
+| 4  | Duplicate JSON keys | Left as is: `encoding/json` keeps the last value |
+| 4  | `\u0000` in a string field | Left as is: Postgres rejects it → `500` |
 | 4  | Request body size | No limit |
-| 4  | Unknown paths and methods | `ServeMux` returns plain-text `404` / `405`, not the JSON error body |
-| 11 | `DATABASE_URL` unset | No default in the docs: exit, or default to the Compose URL? |
-| 12 | README | Replace the template README, or add a section to it? |
+| 4  | Unknown paths and methods | Left as is: `ServeMux` plain-text `404` / `405` |
+| 11 | `DATABASE_URL` unset | The server exits with an error |
+| 11 | Where the 5 s request deadline is set | In the handler |
+| 11 | Compose Postgres | `postgres:16-alpine` on port 5432, database `wallet` |
+| 12 | README | Solution section on top; the template's text kept below |
