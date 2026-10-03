@@ -21,8 +21,10 @@ inside the transaction.
 
 ## Consequences
 
-- Atomicity comes from Postgres: an error or crash at any step rolls
-  everything back, so there are no partial transfers to repair.
+- Atomicity comes from Postgres: an error or crash before `COMMIT` rolls
+  everything back, so there are no partial transfers to repair. If `COMMIT`
+  itself fails, the outcome is unknown but still all or nothing; a retry
+  with the same key replays or runs as new (design §9).
 - No `PENDING` transfer is ever committed, so no recovery job is needed.
 - The response always carries a final state, `PROCESSED` or `FAILED`.
 - `PENDING` is internal bookkeeping; clients never observe it.

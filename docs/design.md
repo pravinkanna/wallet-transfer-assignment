@@ -387,6 +387,8 @@ stored, or none are:
   replays.
 - **First request fails before commit:** nothing is stored, including the
   key, so the retry runs as new.
+- **First request's `COMMIT` fails (`500`, outcome unknown):** either
+  everything or nothing was stored, so the retry replays or runs as new (§9).
 - **Process restarts:** the key is in Postgres.
 
 ### Alternatives Considered
