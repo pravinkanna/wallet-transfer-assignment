@@ -59,3 +59,49 @@ func TestTransferWithSufficientFunds(t *testing.T) {
 		})
 	}
 }
+
+func TestTransferWithInsufficientFunds(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		fromBalance int64
+		amount      int64
+	}{
+		{"one more than the balance", 100, 101},
+		{"empty wallet", 0, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			beginTest(t)
+			from := createWallet(t, tt.fromBalance)
+			to := createWallet(t, 500)
+			key := newKey()
+
+			got := postTransfer(t, transferBody(key, from, to, tt.amount)).transfer(t, http.StatusUnprocessableEntity)
+
+			if got.State != "FAILED" {
+				t.Errorf("state = %q, want FAILED", got.State)
+			}
+			if id, err := uuid.Parse(got.TransferID); err != nil || id.Version() != 7 {
+				t.Errorf("transferId = %q, want a UUIDv7", got.TransferID)
+			}
+
+			wantStored := storedTransfer{key: key, from: from, to: to, amount: tt.amount, state: "FAILED"}
+			if stored := loadTransfer(t, got.TransferID); stored != wantStored {
+				t.Errorf("stored transfer = %+v, want %+v", stored, wantStored)
+			}
+
+			if balance := balanceOf(t, from); balance != tt.fromBalance {
+				t.Errorf("source balance = %d, want %d", balance, tt.fromBalance)
+			}
+			if balance := balanceOf(t, to); balance != 500 {
+				t.Errorf("destination balance = %d, want 500", balance)
+			}
+			if entries := ledgerEntriesOf(t, got.TransferID); len(entries) != 0 {
+				t.Errorf("ledger entries = %+v, want none", entries)
+			}
+		})
+	}
+}
