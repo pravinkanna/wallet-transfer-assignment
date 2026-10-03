@@ -12,6 +12,7 @@ import (
 // Tx is the transaction-scoped repository the transfer workflow runs on.
 type Tx interface {
 	InsertTransfer(ctx context.Context, transfer domain.Transfer) error
+	GetWallet(ctx context.Context, walletID string) (domain.Wallet, error)
 	DebitWallet(ctx context.Context, walletID string, amount int64) error
 	CreditWallet(ctx context.Context, walletID string, amount int64) error
 	InsertLedgerEntry(ctx context.Context, entry domain.LedgerEntry) error
@@ -53,12 +54,27 @@ func (s *TransferService) Transfer(ctx context.Context, req domain.TransferReque
 		if err := tx.InsertTransfer(ctx, transfer); err != nil {
 			return err
 		}
+		source, err := tx.GetWallet(ctx, transfer.FromWalletID)
+		if err != nil {
+			return err
+		}
+		if source.Balance < transfer.Amount {
+			return fail(ctx, tx, &transfer)
+		}
 		return process(ctx, tx, &transfer)
 	})
 	if err != nil {
 		return domain.Transfer{}, err
 	}
 	return transfer, nil
+}
+
+// fail marks the transfer FAILED, leaving balances and the ledger unchanged.
+func fail(ctx context.Context, tx Tx, transfer *domain.Transfer) error {
+	if err := transfer.MarkFailed(); err != nil {
+		return err
+	}
+	return tx.UpdateTransferState(ctx, transfer.ID, transfer.State)
 }
 
 // process moves the balances, writes both ledger entries, and marks the

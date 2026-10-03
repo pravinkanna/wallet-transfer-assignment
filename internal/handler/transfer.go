@@ -78,7 +78,11 @@ func (h *transferHandler) createTransfer(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, transferResponse{TransferID: transfer.ID, State: transfer.State})
+	status := http.StatusCreated
+	if transfer.State == domain.StateFailed {
+		status = http.StatusUnprocessableEntity
+	}
+	writeJSON(w, status, transferResponse{TransferID: transfer.ID, State: transfer.State})
 }
 
 // decodeRequest turns a request body into a validated domain request

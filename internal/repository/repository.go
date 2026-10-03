@@ -56,6 +56,16 @@ func (t *Tx) InsertTransfer(ctx context.Context, transfer domain.Transfer) error
 	return nil
 }
 
+// GetWallet reads a wallet.
+func (t *Tx) GetWallet(ctx context.Context, walletID string) (domain.Wallet, error) {
+	wallet := domain.Wallet{ID: walletID}
+	err := t.tx.QueryRow(ctx, `SELECT balance FROM wallets WHERE id = $1`, walletID).Scan(&wallet.Balance)
+	if err != nil {
+		return domain.Wallet{}, fmt.Errorf("get wallet %s: %w", walletID, err)
+	}
+	return wallet, nil
+}
+
 // DebitWallet subtracts amount from a wallet's balance.
 func (t *Tx) DebitWallet(ctx context.Context, walletID string, amount int64) error {
 	_, err := t.tx.Exec(ctx, `UPDATE wallets SET balance = balance - $2 WHERE id = $1`, walletID, amount)
