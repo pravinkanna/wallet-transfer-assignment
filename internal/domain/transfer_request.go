@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -31,6 +32,11 @@ func NewTransferRequest(idempotencyKey, fromWalletID, toWalletID, amount string)
 	for _, f := range fields {
 		if n := utf8.RuneCountInString(f.value); n < 1 || n > maxFieldLength {
 			return TransferRequest{}, fmt.Errorf("%w: %s must be 1 to %d characters", ErrInvalidField, f.name, maxFieldLength)
+		}
+		// Postgres text cannot store NUL, so reject it here rather than fail
+		// in the database.
+		if strings.ContainsRune(f.value, 0) {
+			return TransferRequest{}, fmt.Errorf("%w: %s must not contain U+0000", ErrInvalidField, f.name)
 		}
 	}
 	if amount == "" {
