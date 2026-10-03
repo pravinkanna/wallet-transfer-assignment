@@ -92,6 +92,46 @@ func (r apiResponse) transfer(t *testing.T, wantStatus int) transferResponse {
 	return got
 }
 
+// errorResponse is the error body from spec §4.
+type errorResponse struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// errorBody checks the status and decodes an error body, failing on any field
+// the spec does not list or on an empty message.
+func (r apiResponse) errorBody(t *testing.T, wantStatus int) errorResponse {
+	t.Helper()
+	if r.status != wantStatus {
+		t.Fatalf("status = %d, want %d; body: %s", r.status, wantStatus, r.body)
+	}
+	var got errorResponse
+	dec := json.NewDecoder(bytes.NewReader(r.body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&got); err != nil {
+		t.Fatalf("decode error body %s: %v", r.body, err)
+	}
+	if got.Error.Message == "" {
+		t.Errorf("error message is empty; body: %s", r.body)
+	}
+	return got
+}
+
+// transferCount returns how many stored transfers involve a wallet.
+func transferCount(t *testing.T, walletID string) int {
+	t.Helper()
+	var count int
+	err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM transfers WHERE from_wallet_id = $1 OR to_wallet_id = $1`,
+		walletID).Scan(&count)
+	if err != nil {
+		t.Fatalf("count transfers of %s: %v", walletID, err)
+	}
+	return count
+}
+
 func balanceOf(t *testing.T, walletID string) int64 {
 	t.Helper()
 	var balance int64
