@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,14 +44,15 @@ var knownFields = map[string]bool{
 
 // New returns the HTTP handler for the API (spec §1).
 func New(svc *service.TransferService, logger *slog.Logger) http.Handler {
-	h := &transferHandler{svc: svc}
+	h := &transferHandler{svc: svc, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /transfers", h.createTransfer)
 	return mux
 }
 
 type transferHandler struct {
-	svc *service.TransferService
+	svc    *service.TransferService
+	logger *slog.Logger
 }
 
 // transferResponse is the transfer body from spec §3.
@@ -70,21 +72,53 @@ type errorDetail struct {
 }
 
 func (h *transferHandler) createTransfer(w http.ResponseWriter, r *http.Request) {
+	req, transfer, err := h.run(r)
+	status, body := response(transfer, err)
+	h.logRequest(r.Context(), req.IdempotencyKey, transfer, status, err)
+	writeJSON(w, status, body)
+}
+
+// run decodes the request and, if it is valid, runs the transfer.
+func (h *transferHandler) run(r *http.Request) (domain.TransferRequest, domain.Transfer, error) {
 	req, err := decodeRequest(r.Body)
 	if err != nil {
-		writeError(w, err)
-		return
+		return domain.TransferRequest{}, domain.Transfer{}, err
 	}
 	transfer, err := h.svc.Transfer(r.Context(), req)
+	return req, transfer, err
+}
+
+// response returns the status and body for a transfer (spec §3) or an error
+// (spec §4).
+func response(transfer domain.Transfer, err error) (int, any) {
 	if err != nil {
-		writeError(w, err)
-		return
+		return errorBody(err)
 	}
-	status := http.StatusCreated
+	body := transferResponse{TransferID: transfer.ID, State: transfer.State}
 	if transfer.State == domain.StateFailed {
-		status = http.StatusUnprocessableEntity
+		return http.StatusUnprocessableEntity, body
 	}
-	writeJSON(w, status, transferResponse{TransferID: transfer.ID, State: transfer.State})
+	return http.StatusCreated, body
+}
+
+// logRequest writes the request's one log line (design §10). Validation
+// failures before the service have no idempotencyKey; responses without a
+// transfer have no transferId or state.
+func (h *transferHandler) logRequest(ctx context.Context, key string, transfer domain.Transfer, status int, err error) {
+	var attrs []slog.Attr
+	if key != "" {
+		attrs = append(attrs, slog.String("idempotencyKey", key))
+	}
+	if transfer.ID != "" {
+		attrs = append(attrs, slog.String("transferId", transfer.ID), slog.String("state", string(transfer.State)))
+	}
+	attrs = append(attrs, slog.Int("status", status))
+	level := slog.LevelInfo
+	if status == http.StatusInternalServerError {
+		level = slog.LevelError
+		attrs = append(attrs, slog.String("error", err.Error()))
+	}
+	h.logger.LogAttrs(ctx, level, "transfer request", attrs...)
 }
 
 // decodeRequest turns a request body into a validated domain request
@@ -134,19 +168,19 @@ func stringField(fields map[string]json.RawMessage, name string) (string, error)
 	return value, nil
 }
 
-// writeError writes the spec §4 body for err. Any error that is not a client
-// error is a server error, and its details stay out of the response.
-func writeError(w http.ResponseWriter, err error) {
+// errorBody returns the spec §4 status and body for err. Any error that is
+// not a client error is a server error, and its details stay out of the
+// response.
+func errorBody(err error) (int, errorResponse) {
 	for _, e := range errorCodes {
 		if errors.Is(err, e.err) {
-			writeJSON(w, e.status, errorResponse{Error: errorDetail{Code: e.code, Message: err.Error()}})
-			return
+			return e.status, errorResponse{Error: errorDetail{Code: e.code, Message: err.Error()}}
 		}
 	}
-	writeJSON(w, http.StatusInternalServerError, errorResponse{Error: errorDetail{
+	return http.StatusInternalServerError, errorResponse{Error: errorDetail{
 		Code:    "INTERNAL_ERROR",
 		Message: "internal server error",
-	}})
+	}}
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
