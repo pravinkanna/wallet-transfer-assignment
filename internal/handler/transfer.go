@@ -133,8 +133,8 @@ func stringField(fields map[string]json.RawMessage, name string) (string, error)
 	return value, nil
 }
 
-// writeError writes the spec §4 body for a client error. Any other error is a
-// server error.
+// writeError writes the spec §4 body for err. Any error that is not a client
+// error is a server error, and its details stay out of the response.
 func writeError(w http.ResponseWriter, err error) {
 	for _, e := range errorCodes {
 		if errors.Is(err, e.err) {
@@ -142,7 +142,10 @@ func writeError(w http.ResponseWriter, err error) {
 			return
 		}
 	}
-	http.Error(w, "internal error", http.StatusInternalServerError)
+	writeJSON(w, http.StatusInternalServerError, errorResponse{Error: errorDetail{
+		Code:    "INTERNAL_ERROR",
+		Message: "internal server error",
+	}})
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
