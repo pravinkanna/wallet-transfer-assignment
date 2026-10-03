@@ -15,7 +15,7 @@ func TestDatabaseUnavailable(t *testing.T) {
 		t.Fatalf("find free port: %v", err)
 	}
 	// Nothing listens on port, so the server cannot reach its database.
-	server := startServer(t, fmt.Sprintf("postgres://postgres:postgres@localhost:%d/postgres", port))
+	server := startServer(t, fmt.Sprintf("postgres://postgres:postgres@localhost:%d/postgres", port), discardLogger)
 
 	got := postTransferTo(t, server, transferBody(newKey(), from, to, 100)).errorBody(t, http.StatusInternalServerError)
 

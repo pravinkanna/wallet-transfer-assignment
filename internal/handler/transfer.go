@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/pravinkanna/wallet-transfer-assignment/internal/domain"
@@ -41,7 +42,7 @@ var knownFields = map[string]bool{
 }
 
 // New returns the HTTP handler for the API (spec §1).
-func New(svc *service.TransferService) http.Handler {
+func New(svc *service.TransferService, logger *slog.Logger) http.Handler {
 	h := &transferHandler{svc: svc}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /transfers", h.createTransfer)

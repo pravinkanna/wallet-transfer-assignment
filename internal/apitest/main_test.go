@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +26,9 @@ var (
 	pool        *pgxpool.Pool
 	apiURL      string
 )
+
+// discardLogger drops the log output of servers whose logs no test checks.
+var discardLogger = slog.New(slog.DiscardHandler)
 
 func TestMain(m *testing.M) {
 	os.Exit(run(m))
@@ -86,7 +90,7 @@ func run(m *testing.M) int {
 		return 1
 	}
 
-	server := httptest.NewServer(newHandler(pool))
+	server := httptest.NewServer(newHandler(pool, discardLogger))
 	defer server.Close()
 	apiURL = server.URL
 
@@ -94,8 +98,8 @@ func run(m *testing.M) int {
 }
 
 // newHandler builds the API on pool, wired the same way as in cmd/server.
-func newHandler(pool *pgxpool.Pool) http.Handler {
-	return handler.New(service.New(repository.New(pool)))
+func newHandler(pool *pgxpool.Pool, logger *slog.Logger) http.Handler {
+	return handler.New(service.New(repository.New(pool)), logger)
 }
 
 // freePort asks the OS for an unused TCP port.

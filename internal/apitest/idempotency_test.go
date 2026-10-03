@@ -74,7 +74,7 @@ func TestReplayAfterRestart(t *testing.T) {
 	original := postTransfer(t, body)
 	original.transfer(t, http.StatusCreated)
 	// A new server and pool on the same database, as after a restart.
-	replay := postTransferTo(t, startServer(t, databaseURL), body)
+	replay := postTransferTo(t, startServer(t, databaseURL, discardLogger), body)
 
 	assertSameResponse(t, replay, original)
 	assertMovedOnce(t, from, 700, to, 300)

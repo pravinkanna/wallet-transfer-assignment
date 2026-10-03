@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -112,16 +113,16 @@ func postConcurrently(t *testing.T, bodies []string) []apiResponse {
 	return responses
 }
 
-// startServer starts another API server with its own pool on dbURL and
-// returns the server's URL.
-func startServer(t *testing.T, dbURL string) string {
+// startServer starts another API server with its own pool on dbURL, logging
+// to logger, and returns the server's URL.
+func startServer(t *testing.T, dbURL string, logger *slog.Logger) string {
 	t.Helper()
 	serverPool, err := pgxpool.New(context.Background(), dbURL)
 	if err != nil {
 		t.Fatalf("create pool: %v", err)
 	}
 	t.Cleanup(serverPool.Close)
-	server := httptest.NewServer(newHandler(serverPool))
+	server := httptest.NewServer(newHandler(serverPool, logger))
 	t.Cleanup(server.Close)
 	return server.URL
 }
