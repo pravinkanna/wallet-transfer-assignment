@@ -247,8 +247,9 @@ One `POST /transfers` request, following the order of checks in spec §6.
 
 **Domain** (`domain.NewTransferRequest`)
 
-4. `idempotencyKey`, `fromWalletId`, and `toWalletId` are 1–255 characters,
-   and `amount` is present → otherwise `INVALID_FIELD`.
+4. `idempotencyKey`, `fromWalletId`, and `toWalletId` are 1–255 characters
+   with no NUL (U+0000), which Postgres text cannot store, and `amount` is
+   present → otherwise `INVALID_FIELD`.
 5. `amount` parses with `strconv.ParseInt(raw, 10, 64)` and is greater than
    0 → otherwise `INVALID_AMOUNT`. The raw texts `"100"`, `100.5`, `100.0`,
    and `1e2` do not parse, so all are rejected.

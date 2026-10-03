@@ -39,6 +39,7 @@ Conventions:
 - `amount` must be written as a JSON integer: `"100"`, `100.5`, and `100.0`
   are rejected.
 - Fields not listed above are rejected.
+- String fields must not contain the NUL character (U+0000).
 - The body is at most 64 KiB (65,536 bytes).
 
 A request that breaks any rule is rejected with an error (§4), and nothing is
@@ -104,7 +105,7 @@ A rejected request stores nothing. Every error response has this body:
 | Body is larger than 64 KiB                                     | `413 Content Too Large`     | `REQUEST_TOO_LARGE`      |
 | Body is not a single JSON object (invalid JSON, empty, not an object, or followed by trailing data) | `400 Bad Request` | `INVALID_JSON` |
 | Body contains a field not listed in §2                         | `400 Bad Request`           | `UNKNOWN_FIELD`          |
-| A field is missing, `null`, empty, not a string where a string is expected, or longer than 255 characters | `400 Bad Request` | `INVALID_FIELD` |
+| A field is missing, `null`, empty, not a string where a string is expected, longer than 255 characters, or contains U+0000 | `400 Bad Request` | `INVALID_FIELD` |
 | `amount` is present but not a JSON integer from 1 to int64 max | `400 Bad Request`           | `INVALID_AMOUNT`         |
 | `fromWalletId` equals `toWalletId`                             | `400 Bad Request`           | `SAME_WALLET`            |
 | A wallet does not exist                                        | `400 Bad Request`           | `WALLET_NOT_FOUND`       |
@@ -145,7 +146,8 @@ Checks run in this order, and the first one that fails decides the response.
 2. The body has no fields beyond those in §2 → otherwise `UNKNOWN_FIELD`
 3. `idempotencyKey`, `fromWalletId`, `toWalletId`, and `amount` are present
    and not `null`, and the three string fields are JSON strings of 1–255
-   characters, checked in that order → otherwise `INVALID_FIELD`
+   characters with no U+0000, checked in that order → otherwise
+   `INVALID_FIELD`
 4. `amount` is a JSON integer from 1 to int64 max → otherwise `INVALID_AMOUNT`
 5. `fromWalletId` differs from `toWalletId` → otherwise `SAME_WALLET`
 6. The `idempotencyKey` is new → if it exists with the same body, replay
