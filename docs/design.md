@@ -546,6 +546,7 @@ rather than internals.
 | Failures | Insufficient funds → `422 FAILED`, no entries, balances unchanged; every `400` code in spec §4; check order (missing field + bad amount → `INVALID_FIELD`); database unavailable → `500`, nothing stored |
 | Idempotency | Replaying a `PROCESSED` or `FAILED` transfer returns the identical response and adds no rows; different body → `409`; a rejected request does not use up its key; replay after restarting the service (new pool, same database) |
 | Concurrency | 50 concurrent debits of 100 from a wallet holding 1000 → exactly 10 `PROCESSED`, balance 0; transfers in both directions between two wallets → no deadlock; 20 concurrent requests with one key → one transfer, 20 identical responses |
+| Observability | One log line per request with the §10 fields: `201` → `INFO` with `idempotencyKey`, `transferId`, `state`, `status`; `500` → `ERROR` with `idempotencyKey`, `status`, `error` |
 
 ### Workflow
 
