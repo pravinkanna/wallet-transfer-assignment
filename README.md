@@ -16,7 +16,7 @@ The template's original README follows [below](#wallet-transfer-assignment-repos
 
 | Doc | Covers |
 |-----|--------|
-| [Requirements](docs/requirements.md) | Problem, requirements, and decisions D-1 to D-18 |
+| [Requirements](docs/requirements.md) | Problem, requirements, and decisions D-1 to D-20 |
 | [API spec](docs/api-spec.md) | `POST /transfers`: request, responses, error codes, idempotency |
 | [Design](docs/design.md) | Layout, schema, transfer flow, locking, failure modes, tests |
 | [ADRs](docs/adr/README.md) | The eight main design decisions |
