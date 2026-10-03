@@ -39,6 +39,7 @@ Conventions:
 - `amount` must be written as a JSON integer: `"100"`, `100.5`, and `100.0`
   are rejected.
 - Fields not listed above are rejected.
+- The body is at most 64 KiB (65,536 bytes).
 
 A request that breaks any rule is rejected with an error (§4), and nothing is
 stored.
@@ -100,6 +101,7 @@ A rejected request stores nothing. Every error response has this body:
 
 | Case                                                           | Status                      | Code                     |
 |----------------------------------------------------------------|-----------------------------|--------------------------|
+| Body is larger than 64 KiB                                     | `413 Content Too Large`     | `REQUEST_TOO_LARGE`      |
 | Body is not a single JSON object (invalid JSON, empty, not an object, or followed by trailing data) | `400 Bad Request` | `INVALID_JSON` |
 | Body contains a field not listed in §2                         | `400 Bad Request`           | `UNKNOWN_FIELD`          |
 | A field is missing, `null`, empty, not a string where a string is expected, or longer than 255 characters | `400 Bad Request` | `INVALID_FIELD` |
@@ -138,7 +140,8 @@ service and are kept indefinitely.
 
 Checks run in this order, and the first one that fails decides the response.
 
-1. The body is a single JSON object → otherwise `INVALID_JSON`
+1. The body is at most 64 KiB → otherwise `REQUEST_TOO_LARGE`; it is a single
+   JSON object → otherwise `INVALID_JSON`
 2. The body has no fields beyond those in §2 → otherwise `UNKNOWN_FIELD`
 3. `idempotencyKey`, `fromWalletId`, `toWalletId`, and `amount` are present
    and not `null`, and the three string fields are JSON strings of 1–255
@@ -187,7 +190,7 @@ database transaction.
 | `201` `PROCESSED`      | yes, `PROCESSED` | 2              | source − `amount`, destination + `amount`   | yes, with the result to replay  |
 | `422` `FAILED`         | yes, `FAILED`    | none           | unchanged                                   | yes, with the result to replay  |
 | Replay                 | no new transfer  | no new entries | unchanged                                   | no change                       |
-| `400` / `409` rejected | no               | none           | unchanged                                   | no                              |
+| `400` / `409` / `413` rejected | no               | none           | unchanged                                   | no                              |
 | `500` server error     | no               | none           | unchanged                                   | no                              |
 
 The two ledger entries of a `PROCESSED` transfer:

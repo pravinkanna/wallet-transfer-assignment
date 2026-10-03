@@ -90,6 +90,7 @@ A request is rejected with an error, and no transfer is created, when:
 - `amount` is not a positive integer
 - `fromWalletId` equals `toWalletId`
 - either wallet does not exist
+- the body is larger than 64 KiB
 
 Behavior:
 
@@ -274,6 +275,7 @@ were resolved.
 | D-16 | Whether tests may need a running database | No; `go test ./...` needs no external service | §5 |
 | D-17 | Which optional enhancements to build | Retry-safe workflows only, covered by D-11 and NFR-1/NFR-2; balance API, history API, and metrics are out | §6 |
 | D-18 | Authentication and authorization | Out of scope | §6 |
+| D-19 | Maximum request body size (raised in PR review) | 64 KiB, over 10× the largest valid request; a larger body is rejected | FR-1 |
 
 ### Open Questions
 

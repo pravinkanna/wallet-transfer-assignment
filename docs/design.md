@@ -236,9 +236,10 @@ One `POST /transfers` request, following the order of checks in spec §6.
 
 **Handler**
 
-1. Decode the body into `map[string]json.RawMessage`. A body that is not a
-   single JSON object (invalid, empty, not an object, or followed by trailing
-   data) → `INVALID_JSON`.
+1. Read the body through `http.MaxBytesReader` with a 64 KiB limit; a larger
+   body → `REQUEST_TOO_LARGE`. Decode it into `map[string]json.RawMessage`. A
+   body that is not a single JSON object (invalid, empty, not an object, or
+   followed by trailing data) → `INVALID_JSON`.
 2. Any key other than the four in spec §2 → `UNKNOWN_FIELD`.
 3. Turn the raw values into domain input. Each string field must be a JSON
    string (otherwise `INVALID_FIELD`) and is unquoted. `amount` is passed on
@@ -467,6 +468,7 @@ test than one transaction plus reconciliation checks.
 
 | Failure | What happens | Client sees | Stored |
 |---------|--------------|-------------|--------|
+| Body larger than 64 KiB | Reading stops at the limit; rejected before any database work | `413` | Nothing |
 | Invalid request (spec §6 steps 1–5) | Rejected before any database work | `400` | Nothing |
 | Unknown wallet | FK violation on the key claim; rollback | `400 WALLET_NOT_FOUND` | Nothing |
 | Key reused with a different body | Rollback | `409` | Nothing |
@@ -543,7 +545,7 @@ rather than internals.
 | Area | Scenarios |
 |------|-----------|
 | Transfer execution | Sufficient funds → `201 PROCESSED`, balances moved, two ledger entries; amount equal to the balance → balance 0 |
-| Failures | Insufficient funds → `422 FAILED`, no entries, balances unchanged; every `400` code in spec §4; check order (missing field + bad amount → `INVALID_FIELD`); database unavailable → `500`, nothing stored |
+| Failures | Insufficient funds → `422 FAILED`, no entries, balances unchanged; every `400` code in spec §4; a body over 64 KiB → `413`; check order (missing field + bad amount → `INVALID_FIELD`); database unavailable → `500`, nothing stored |
 | Idempotency | Replaying a `PROCESSED` or `FAILED` transfer returns the identical response and adds no rows; different body → `409`; a rejected request does not use up its key; replay after restarting the service (new pool, same database) |
 | Concurrency | 50 concurrent debits of 100 from a wallet holding 1000 → exactly 10 `PROCESSED`, balance 0; transfers in both directions between two wallets → no deadlock; 20 concurrent requests with one key → one transfer, 20 identical responses |
 | Observability | One log line per request with the §10 fields: `201` → `INFO` with `idempotencyKey`, `transferId`, `state`, `status`; `500` → `ERROR` with `idempotencyKey`, `status`, `error` |
