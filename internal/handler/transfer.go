@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,14 +15,18 @@ import (
 	"github.com/pravinkanna/wallet-transfer-assignment/internal/service"
 )
 
+// maxBodyBytes is the largest request body accepted (spec §2).
+const maxBodyBytes = 64 << 10
+
 // requestTimeout bounds each request, including any wait for a wallet lock
 // (design §9).
 const requestTimeout = 5 * time.Second
 
 // Errors for spec §6 steps 1–2, which only the handler can check.
 var (
-	errInvalidJSON  = errors.New("body must be a single JSON object")
-	errUnknownField = errors.New("unknown field")
+	errRequestTooLarge = errors.New("body must be at most 64 KiB")
+	errInvalidJSON     = errors.New("body must be a single JSON object")
+	errUnknownField    = errors.New("unknown field")
 )
 
 // errorCodes maps each client error to its status and code from spec §4.
@@ -30,6 +35,7 @@ var errorCodes = []struct {
 	status int
 	code   string
 }{
+	{errRequestTooLarge, http.StatusRequestEntityTooLarge, "REQUEST_TOO_LARGE"},
 	{errInvalidJSON, http.StatusBadRequest, "INVALID_JSON"},
 	{errUnknownField, http.StatusBadRequest, "UNKNOWN_FIELD"},
 	{domain.ErrInvalidField, http.StatusBadRequest, "INVALID_FIELD"},
@@ -80,7 +86,7 @@ func (h *transferHandler) createTransfer(w http.ResponseWriter, r *http.Request)
 	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
 	defer cancel()
 
-	req, transfer, err := h.run(ctx, r.Body)
+	req, transfer, err := h.run(ctx, http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	status, body := response(transfer, err)
 	h.logRequest(ctx, req.IdempotencyKey, transfer, status, err)
 	writeJSON(w, status, body)
@@ -132,7 +138,18 @@ func (h *transferHandler) logRequest(ctx context.Context, key string, transfer d
 // decodeRequest turns a request body into a validated domain request
 // (design §5).
 func decodeRequest(body io.Reader) (domain.TransferRequest, error) {
-	dec := json.NewDecoder(body)
+	// Read the whole body first, so the size check comes before the JSON
+	// check (spec §6 step 1).
+	data, err := io.ReadAll(body)
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return domain.TransferRequest{}, errRequestTooLarge
+	}
+	if err != nil {
+		return domain.TransferRequest{}, errInvalidJSON
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(data))
 	var fields map[string]json.RawMessage
 	if err := dec.Decode(&fields); err != nil || fields == nil {
 		return domain.TransferRequest{}, errInvalidJSON
