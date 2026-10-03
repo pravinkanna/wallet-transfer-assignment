@@ -83,7 +83,7 @@ func New[T Tx](repo Repository[T]) *TransferService
 | 13 | Body size limit (PR review) | Exactly 64 KiB → `201`; one byte over, padded inside or after the object → `413 REQUEST_TOO_LARGE`; over the limit and not JSON → `413` | Body read whole through `http.MaxBytesReader`, then decoded, so the size check comes first |
 | 14 | NUL in string fields (PR review) | NUL in each string field → `ErrInvalidField` (domain) and `400 INVALID_FIELD` (API), not `500` | Domain rejects U+0000 |
 | 15 | Startup schema and seed (PR review) | — (passes on arrival; shown to fail against a seed that resets balances and a schema without `IF NOT EXISTS`) | Test only |
-| 16 | Documentation fixes (PR review) | — | README decision range D-1 to D-20; spec and design say a failed `COMMIT` leaves the outcome unknown and a retry with the same key is safe |
+| 16 | Documentation fixes (PR review) | — | README decision range D-1 to D-20; spec, design, and ADR-005 say a failed `COMMIT` leaves the outcome unknown and a retry with the same key is safe |
 
 Notes:
 
@@ -122,7 +122,7 @@ As committed, oldest first.
 | 13 | `Add 64 KiB request body limit to the docs` → `Add failing tests for the request body limit` → `Reject request bodies over 64 KiB` |
 | 14 | `Reject NUL characters in string fields in the docs` → `Add failing tests for NUL characters in string fields` → `Reject NUL characters in string fields` |
 | 15 | `Add startup schema and seed scenario to design test strategy` → `Test that startup schema and seed are safe to reapply` |
-| 16 | `Update README decision range to D-20` → `Document unknown commit outcomes in spec and design` |
+| 16 | `Update README decision range to D-20` → `Document unknown commit outcomes in spec and design` → `Document unknown commit outcomes in ADR-005 and design idempotency` |
 
 ## 6. Questions Resolved During Implementation
 
