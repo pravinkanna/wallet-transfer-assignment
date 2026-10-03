@@ -8,10 +8,15 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/pravinkanna/wallet-transfer-assignment/internal/domain"
 	"github.com/pravinkanna/wallet-transfer-assignment/internal/service"
 )
+
+// requestTimeout bounds each request, including any wait for a wallet lock
+// (design §9).
+const requestTimeout = 5 * time.Second
 
 // Errors for spec §6 steps 1–2, which only the handler can check.
 var (
@@ -72,19 +77,22 @@ type errorDetail struct {
 }
 
 func (h *transferHandler) createTransfer(w http.ResponseWriter, r *http.Request) {
-	req, transfer, err := h.run(r)
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+	defer cancel()
+
+	req, transfer, err := h.run(ctx, r.Body)
 	status, body := response(transfer, err)
-	h.logRequest(r.Context(), req.IdempotencyKey, transfer, status, err)
+	h.logRequest(ctx, req.IdempotencyKey, transfer, status, err)
 	writeJSON(w, status, body)
 }
 
 // run decodes the request and, if it is valid, runs the transfer.
-func (h *transferHandler) run(r *http.Request) (domain.TransferRequest, domain.Transfer, error) {
-	req, err := decodeRequest(r.Body)
+func (h *transferHandler) run(ctx context.Context, body io.Reader) (domain.TransferRequest, domain.Transfer, error) {
+	req, err := decodeRequest(body)
 	if err != nil {
 		return domain.TransferRequest{}, domain.Transfer{}, err
 	}
-	transfer, err := h.svc.Transfer(r.Context(), req)
+	transfer, err := h.svc.Transfer(ctx, req)
 	return req, transfer, err
 }
 
