@@ -122,3 +122,56 @@ func TestUnknownWallet(t *testing.T) {
 		})
 	}
 }
+
+func TestRequestBodyLimit(t *testing.T) {
+	t.Parallel()
+
+	const limit = 64 << 10 // spec §2
+
+	tests := []struct {
+		name       string
+		body       func(valid string) string
+		wantStatus int
+	}{
+		{"exactly 64 KiB", func(valid string) string {
+			return padInside(valid, limit)
+		}, http.StatusCreated},
+		{"one byte over, padded inside the object", func(valid string) string {
+			return padInside(valid, limit+1)
+		}, http.StatusRequestEntityTooLarge},
+		{"one byte over, padded after the object", func(valid string) string {
+			return valid + strings.Repeat(" ", limit+1-len(valid))
+		}, http.StatusRequestEntityTooLarge},
+		// Spec §6 step 1: the size check comes before the JSON check.
+		{"over the limit and not JSON", func(string) string {
+			return strings.Repeat("x", limit+1)
+		}, http.StatusRequestEntityTooLarge},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			beginTest(t)
+			from := createWallet(t, 1000)
+			to := createWallet(t, 1000)
+
+			resp := postTransfer(t, tt.body(transferBody(newKey(), from, to, 100)))
+
+			if tt.wantStatus == http.StatusCreated {
+				resp.transfer(t, http.StatusCreated)
+				return
+			}
+			got := resp.errorBody(t, tt.wantStatus)
+			if got.Error.Code != "REQUEST_TOO_LARGE" {
+				t.Errorf("code = %s, want REQUEST_TOO_LARGE", got.Error.Code)
+			}
+			assertUntouched(t, from, 1000)
+			assertUntouched(t, to, 1000)
+		})
+	}
+}
+
+// padInside pads a JSON object with spaces before its closing brace, so the
+// body is exactly size bytes and still valid.
+func padInside(object string, size int) string {
+	return object[:len(object)-1] + strings.Repeat(" ", size-len(object)) + "}"
+}
