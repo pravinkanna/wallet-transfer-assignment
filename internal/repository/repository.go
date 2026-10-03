@@ -78,12 +78,16 @@ func (t *Tx) FindTransferByKey(ctx context.Context, key string) (domain.Transfer
 	return transfer, nil
 }
 
-// GetWallet reads a wallet.
-func (t *Tx) GetWallet(ctx context.Context, walletID string) (domain.Wallet, error) {
+// LockWallet locks a wallet's row until the transaction ends and reads it.
+// FOR NO KEY UPDATE queues other transfers on the wallet without conflicting
+// with the FOR KEY SHARE locks that foreign keys take (design §7).
+func (t *Tx) LockWallet(ctx context.Context, walletID string) (domain.Wallet, error) {
 	wallet := domain.Wallet{ID: walletID}
-	err := t.tx.QueryRow(ctx, `SELECT balance FROM wallets WHERE id = $1`, walletID).Scan(&wallet.Balance)
+	err := t.tx.QueryRow(ctx,
+		`SELECT balance FROM wallets WHERE id = $1 FOR NO KEY UPDATE`, walletID,
+	).Scan(&wallet.Balance)
 	if err != nil {
-		return domain.Wallet{}, fmt.Errorf("get wallet %s: %w", walletID, err)
+		return domain.Wallet{}, fmt.Errorf("lock wallet %s: %w", walletID, err)
 	}
 	return wallet, nil
 }

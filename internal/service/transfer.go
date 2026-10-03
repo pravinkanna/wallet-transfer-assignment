@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/google/uuid"
 
@@ -13,7 +14,7 @@ import (
 type Tx interface {
 	InsertTransfer(ctx context.Context, transfer domain.Transfer) (bool, error)
 	FindTransferByKey(ctx context.Context, key string) (domain.Transfer, error)
-	GetWallet(ctx context.Context, walletID string) (domain.Wallet, error)
+	LockWallet(ctx context.Context, walletID string) (domain.Wallet, error)
 	DebitWallet(ctx context.Context, walletID string, amount int64) error
 	CreditWallet(ctx context.Context, walletID string, amount int64) error
 	InsertLedgerEntry(ctx context.Context, entry domain.LedgerEntry) error
@@ -69,7 +70,7 @@ func (s *TransferService) Transfer(ctx context.Context, req domain.TransferReque
 			return nil
 		}
 
-		source, err := tx.GetWallet(ctx, transfer.FromWalletID)
+		source, err := lockWallets(ctx, tx, transfer)
 		if err != nil {
 			return err
 		}
@@ -82,6 +83,26 @@ func (s *TransferService) Transfer(ctx context.Context, req domain.TransferReque
 		return domain.Transfer{}, err
 	}
 	return transfer, nil
+}
+
+// lockWallets locks both wallets in ascending ID order and returns the source
+// wallet. The balance is read under the lock, so no other transfer can spend
+// it before this one commits. Locking in one order means transfers in
+// opposite directions cannot deadlock (design §7).
+func lockWallets(ctx context.Context, tx Tx, transfer domain.Transfer) (domain.Wallet, error) {
+	ids := []string{transfer.FromWalletID, transfer.ToWalletID}
+	slices.Sort(ids)
+	var source domain.Wallet
+	for _, id := range ids {
+		wallet, err := tx.LockWallet(ctx, id)
+		if err != nil {
+			return domain.Wallet{}, err
+		}
+		if id == transfer.FromWalletID {
+			source = wallet
+		}
+	}
+	return source, nil
 }
 
 // fail marks the transfer FAILED, leaving balances and the ledger unchanged.
