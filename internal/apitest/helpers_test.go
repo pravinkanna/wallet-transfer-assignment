@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // beginTest runs t in parallel with other tests and checks the ledger
@@ -56,18 +60,79 @@ type apiResponse struct {
 	body   []byte
 }
 
-func postTransfer(t *testing.T, body string) apiResponse {
-	t.Helper()
-	resp, err := http.Post(apiURL+"/transfers", "application/json", strings.NewReader(body))
+// send posts body to the server at baseURL.
+func send(baseURL, body string) (apiResponse, error) {
+	resp, err := http.Post(baseURL+"/transfers", "application/json", strings.NewReader(body))
 	if err != nil {
-		t.Fatalf("POST /transfers: %v", err)
+		return apiResponse{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("read response: %v", err)
+		return apiResponse{}, err
 	}
-	return apiResponse{status: resp.StatusCode, body: data}
+	return apiResponse{status: resp.StatusCode, body: data}, nil
+}
+
+func postTransfer(t *testing.T, body string) apiResponse {
+	t.Helper()
+	return postTransferTo(t, apiURL, body)
+}
+
+func postTransferTo(t *testing.T, baseURL, body string) apiResponse {
+	t.Helper()
+	resp, err := send(baseURL, body)
+	if err != nil {
+		t.Fatalf("POST /transfers: %v", err)
+	}
+	return resp
+}
+
+// postConcurrently releases all bodies at the same moment and returns the
+// responses in the same order.
+func postConcurrently(t *testing.T, bodies []string) []apiResponse {
+	t.Helper()
+	responses := make([]apiResponse, len(bodies))
+	errs := make([]error, len(bodies))
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i, body := range bodies {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			responses[i], errs[i] = send(apiURL, body)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		t.Fatalf("POST /transfers: %v", err)
+	}
+	return responses
+}
+
+// startServer starts another API server with its own pool on the shared
+// database, as a restarted process would be, and returns its URL.
+func startServer(t *testing.T) string {
+	t.Helper()
+	restartedPool, err := pgxpool.New(context.Background(), databaseURL)
+	if err != nil {
+		t.Fatalf("create pool: %v", err)
+	}
+	t.Cleanup(restartedPool.Close)
+	server := httptest.NewServer(newHandler(restartedPool))
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
+// assertSameResponse fails t unless got has the same status and body bytes
+// as the original response.
+func assertSameResponse(t *testing.T, got, original apiResponse) {
+	t.Helper()
+	if got.status != original.status || !bytes.Equal(got.body, original.body) {
+		t.Errorf("response = %d %s, want the original %d %s", got.status, got.body, original.status, original.body)
+	}
 }
 
 // transferResponse is the transfer body from spec §3.

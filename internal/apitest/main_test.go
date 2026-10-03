@@ -21,8 +21,9 @@ import (
 
 // Shared by every test: one embedded Postgres, one pool, and one API server.
 var (
-	pool   *pgxpool.Pool
-	apiURL string
+	databaseURL string
+	pool        *pgxpool.Pool
+	apiURL      string
 )
 
 func TestMain(m *testing.M) {
@@ -72,7 +73,8 @@ func run(m *testing.M) int {
 		}
 	}()
 
-	pool, err = pgxpool.New(ctx, config.GetConnectionURL())
+	databaseURL = config.GetConnectionURL()
+	pool, err = pgxpool.New(ctx, databaseURL)
 	if err != nil {
 		log.Printf("create pool: %v", err)
 		return 1
