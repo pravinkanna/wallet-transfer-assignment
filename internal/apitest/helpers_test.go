@@ -132,7 +132,7 @@ type ledgerEntry struct {
 func ledgerEntriesOf(t *testing.T, transferID string) []ledgerEntry {
 	t.Helper()
 	rows, err := pool.Query(context.Background(), `
-		SELECT wallet_id, type::text, amount
+		SELECT wallet_id, type::text AS entry_type, amount
 		FROM ledger_entries WHERE transfer_id = $1 ORDER BY type`, transferID)
 	if err != nil {
 		t.Fatalf("query ledger entries of %s: %v", transferID, err)
