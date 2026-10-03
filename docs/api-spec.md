@@ -9,7 +9,8 @@ from one wallet to another. The requirements behind it are in
 Conventions:
 
 - Request and response bodies are JSON. The `Content-Type` header is not
-  checked; a body that is not valid JSON is rejected with an error (§4).
+  checked; a body that is not a single JSON object is rejected with an error
+  (§4).
 - Field names are camelCase, as in the assignment's example request.
 - There is no authentication (requirements D-18).
 - The path has no version prefix; the endpoint is `/transfers`, as given in
@@ -99,9 +100,9 @@ A rejected request stores nothing. Every error response has this body:
 
 | Case                                                           | Status                      | Code                     |
 |----------------------------------------------------------------|-----------------------------|--------------------------|
-| Body is not valid JSON                                         | `400 Bad Request`           | `INVALID_JSON`           |
+| Body is not a single JSON object (invalid JSON, empty, not an object, or followed by trailing data) | `400 Bad Request` | `INVALID_JSON` |
 | Body contains a field not listed in §2                         | `400 Bad Request`           | `UNKNOWN_FIELD`          |
-| A field is missing, empty, or longer than 255 characters       | `400 Bad Request`           | `INVALID_FIELD`          |
+| A field is missing, `null`, empty, not a string where a string is expected, or longer than 255 characters | `400 Bad Request` | `INVALID_FIELD` |
 | `amount` is present but not a JSON integer from 1 to int64 max | `400 Bad Request`           | `INVALID_AMOUNT`         |
 | `fromWalletId` equals `toWalletId`                             | `400 Bad Request`           | `SAME_WALLET`            |
 | A wallet does not exist                                        | `400 Bad Request`           | `WALLET_NOT_FOUND`       |
@@ -137,11 +138,11 @@ service and are kept indefinitely.
 
 Checks run in this order, and the first one that fails decides the response.
 
-1. The body is valid JSON → otherwise `INVALID_JSON`
+1. The body is a single JSON object → otherwise `INVALID_JSON`
 2. The body has no fields beyond those in §2 → otherwise `UNKNOWN_FIELD`
-3. `idempotencyKey`, `fromWalletId`, `toWalletId`, and `amount` are present,
-   non-empty, and within length, checked in that order → otherwise
-   `INVALID_FIELD`
+3. `idempotencyKey`, `fromWalletId`, `toWalletId`, and `amount` are present
+   and not `null`, and the three string fields are JSON strings of 1–255
+   characters, checked in that order → otherwise `INVALID_FIELD`
 4. `amount` is a JSON integer from 1 to int64 max → otherwise `INVALID_AMOUNT`
 5. `fromWalletId` differs from `toWalletId` → otherwise `SAME_WALLET`
 6. The `idempotencyKey` is new → if it exists with the same body, replay
