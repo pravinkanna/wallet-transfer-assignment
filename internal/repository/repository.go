@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/pravinkanna/wallet-transfer-assignment/internal/domain"
@@ -33,12 +35,21 @@ func (r *Repository) InTx(ctx context.Context, fn func(*Tx) error) error {
 	})
 }
 
-// InsertTransfer stores a new transfer as PENDING.
+// foreignKeyViolation is the Postgres error code for a reference to a row
+// that does not exist.
+const foreignKeyViolation = "23503"
+
+// InsertTransfer stores a new transfer as PENDING. It returns
+// domain.ErrWalletNotFound if either wallet does not exist.
 func (t *Tx) InsertTransfer(ctx context.Context, transfer domain.Transfer) error {
 	_, err := t.tx.Exec(ctx, `
 		INSERT INTO transfers (id, idempotency_key, from_wallet_id, to_wallet_id, amount, state)
 		VALUES ($1, $2, $3, $4, $5, 'PENDING')`,
 		transfer.ID, transfer.IdempotencyKey, transfer.FromWalletID, transfer.ToWalletID, transfer.Amount)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation {
+		return domain.ErrWalletNotFound
+	}
 	if err != nil {
 		return fmt.Errorf("insert transfer: %w", err)
 	}

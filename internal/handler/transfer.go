@@ -28,6 +28,7 @@ var errorCodes = []struct {
 	{domain.ErrInvalidField, http.StatusBadRequest, "INVALID_FIELD"},
 	{domain.ErrInvalidAmount, http.StatusBadRequest, "INVALID_AMOUNT"},
 	{domain.ErrSameWallet, http.StatusBadRequest, "SAME_WALLET"},
+	{domain.ErrWalletNotFound, http.StatusBadRequest, "WALLET_NOT_FOUND"},
 }
 
 // knownFields are the request fields from spec §2.
