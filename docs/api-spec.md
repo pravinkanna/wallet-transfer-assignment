@@ -84,7 +84,8 @@ Transfer body:
 
 ## 4. Errors
 
-A rejected request stores nothing. Every error response has this body:
+A `4xx` response stores nothing; for a `500`, see §6. Every error response
+has this body:
 
 ```json
 {
@@ -128,10 +129,12 @@ service and are kept indefinitely.
   compared by value: whitespace and field order in the JSON don't matter.
 - Replaying the key of a `FAILED` transfer returns the same `422` response,
   even if the source wallet's balance has grown since.
-- Only stored transfers (`PROCESSED` or `FAILED`) use up a key. A rejected
-  request (§4) stores nothing, so its key can be sent again.
-- If the in-progress request fails with a server error, it stores nothing,
-  and the waiting request is processed as a new request.
+- Only stored transfers (`PROCESSED` or `FAILED`) use up a key. A `4xx`
+  response (§4) stores nothing, so its key can be sent again.
+- If the in-progress request fails before it commits, it stores nothing, and
+  the waiting request is processed as a new request.
+- After a `500`, retrying with the same key is safe: it replays the transfer
+  if one was stored (§6), and runs as a new request if not.
 - Keys are stored durably, so a replay returns the original result after a
   restart, or when the client never received the first response.
 
@@ -181,6 +184,10 @@ database transaction.
   ledger entries.
 - If anything fails before commit, nothing is stored, and the response is
   `500 INTERNAL_ERROR`.
+- If the connection fails during the commit, the service cannot tell whether
+  the commit succeeded, and the response is also `500 INTERNAL_ERROR`. Either
+  everything was stored or nothing was; a retry with the same key finds out
+  safely (§5).
 - Concurrent requests behave as if they ran one after another: each balance
   check sees every transfer committed before it, so two transfers can never
   spend the same funds.
@@ -193,7 +200,10 @@ database transaction.
 | `422` `FAILED`         | yes, `FAILED`    | none           | unchanged                                   | yes, with the result to replay  |
 | Replay                 | no new transfer  | no new entries | unchanged                                   | no change                       |
 | `400` / `409` / `413` rejected | no               | none           | unchanged                                   | no                              |
-| `500` server error     | no               | none           | unchanged                                   | no                              |
+| `500` server error¹    | no               | none           | unchanged                                   | no                              |
+
+¹ Unless the commit's outcome is unknown (§6): then everything in the `201`
+or `422` row may have been stored.
 
 The two ledger entries of a `PROCESSED` transfer:
 

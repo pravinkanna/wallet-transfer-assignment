@@ -338,7 +338,7 @@ The service returns the transfer, new or replayed, and the handler maps it:
 | `PROCESSED` transfer (new or replayed)            | `201` (spec §3) |
 | `FAILED` transfer (new or replayed)               | `422` (spec §3) |
 | Domain error                                      | Its code from spec §4 |
-| Any other error, including a failed `COMMIT`      | `500 INTERNAL_ERROR`; the transaction is rolled back |
+| Any other error                                   | `500 INTERNAL_ERROR`. An error before `COMMIT` rolls the transaction back; a failed `COMMIT` leaves the outcome unknown (§9) |
 
 ## 6. Idempotency
 
