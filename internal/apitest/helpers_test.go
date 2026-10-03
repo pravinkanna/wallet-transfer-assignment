@@ -1,0 +1,215 @@
+package apitest
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+)
+
+// beginTest runs t in parallel with other tests and checks the ledger
+// invariants once t ends.
+func beginTest(t *testing.T) {
+	t.Helper()
+	t.Parallel()
+	t.Cleanup(func() { checkInvariants(t) })
+}
+
+// createWallet stores a wallet with a unique ID and the given opening
+// balance, and returns its ID.
+func createWallet(t *testing.T, balance int64) string {
+	t.Helper()
+	id := "wallet-" + uuid.NewString()
+	_, err := pool.Exec(context.Background(),
+		`INSERT INTO wallets (id, opening_balance, balance) VALUES ($1, $2, $2)`, id, balance)
+	if err != nil {
+		t.Fatalf("create wallet: %v", err)
+	}
+	return id
+}
+
+// newKey returns an idempotency key that no other test uses.
+func newKey() string {
+	return "key-" + uuid.NewString()
+}
+
+// transferBody returns a valid POST /transfers body.
+func transferBody(key, from, to string, amount int64) string {
+	body, _ := json.Marshal(map[string]any{
+		"idempotencyKey": key,
+		"fromWalletId":   from,
+		"toWalletId":     to,
+		"amount":         amount,
+	})
+	return string(body)
+}
+
+// apiResponse is a response from POST /transfers.
+type apiResponse struct {
+	status int
+	body   []byte
+}
+
+func postTransfer(t *testing.T, body string) apiResponse {
+	t.Helper()
+	resp, err := http.Post(apiURL+"/transfers", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /transfers: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	return apiResponse{status: resp.StatusCode, body: data}
+}
+
+// transferResponse is the transfer body from spec §3.
+type transferResponse struct {
+	TransferID string `json:"transferId"`
+	State      string `json:"state"`
+}
+
+// transfer checks the status and decodes a transfer body, failing on any
+// field the spec does not list.
+func (r apiResponse) transfer(t *testing.T, wantStatus int) transferResponse {
+	t.Helper()
+	if r.status != wantStatus {
+		t.Fatalf("status = %d, want %d; body: %s", r.status, wantStatus, r.body)
+	}
+	var got transferResponse
+	dec := json.NewDecoder(bytes.NewReader(r.body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&got); err != nil {
+		t.Fatalf("decode transfer body %s: %v", r.body, err)
+	}
+	return got
+}
+
+func balanceOf(t *testing.T, walletID string) int64 {
+	t.Helper()
+	var balance int64
+	err := pool.QueryRow(context.Background(),
+		`SELECT balance FROM wallets WHERE id = $1`, walletID).Scan(&balance)
+	if err != nil {
+		t.Fatalf("read balance of %s: %v", walletID, err)
+	}
+	return balance
+}
+
+// storedTransfer is a row of the transfers table.
+type storedTransfer struct {
+	key, from, to string
+	amount        int64
+	state         string
+}
+
+func loadTransfer(t *testing.T, id string) storedTransfer {
+	t.Helper()
+	var s storedTransfer
+	err := pool.QueryRow(context.Background(), `
+		SELECT idempotency_key, from_wallet_id, to_wallet_id, amount, state::text
+		FROM transfers WHERE id = $1`, id).Scan(&s.key, &s.from, &s.to, &s.amount, &s.state)
+	if err != nil {
+		t.Fatalf("load transfer %s: %v", id, err)
+	}
+	return s
+}
+
+// ledgerEntry is a row of the ledger_entries table.
+type ledgerEntry struct {
+	walletID, entryType string
+	amount              int64
+}
+
+// ledgerEntriesOf returns a transfer's entries, DEBIT first (the enum order).
+func ledgerEntriesOf(t *testing.T, transferID string) []ledgerEntry {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), `
+		SELECT wallet_id, type::text, amount
+		FROM ledger_entries WHERE transfer_id = $1 ORDER BY type`, transferID)
+	if err != nil {
+		t.Fatalf("query ledger entries of %s: %v", transferID, err)
+	}
+	entries, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (ledgerEntry, error) {
+		var e ledgerEntry
+		err := row.Scan(&e.walletID, &e.entryType, &e.amount)
+		return e, err
+	})
+	if err != nil {
+		t.Fatalf("read ledger entries of %s: %v", transferID, err)
+	}
+	return entries
+}
+
+// invariantChecks hold one query per design §8 invariant that the schema
+// cannot enforce. Each query returns the rows that break it. Invariant 8
+// (only PENDING -> PROCESSED or FAILED) follows from 7 and the domain's
+// guarded transitions.
+var invariantChecks = []struct{ invariant, query string }{
+	{
+		// UNIQUE (transfer_id, type) allows at most two entries, so two
+		// matching ones mean exactly these two.
+		"5: a PROCESSED transfer has a DEBIT on the source and a CREDIT on the destination, both for its amount",
+		`SELECT t.id::text FROM transfers t
+		 WHERE t.state = 'PROCESSED'
+		   AND (SELECT count(*) FROM ledger_entries e
+		        WHERE e.transfer_id = t.id AND e.amount = t.amount
+		          AND ((e.type = 'DEBIT' AND e.wallet_id = t.from_wallet_id)
+		            OR (e.type = 'CREDIT' AND e.wallet_id = t.to_wallet_id))) <> 2`,
+	},
+	{
+		"6: a FAILED transfer has no ledger entries",
+		`SELECT t.id::text FROM transfers t
+		 WHERE t.state = 'FAILED'
+		   AND EXISTS (SELECT 1 FROM ledger_entries e WHERE e.transfer_id = t.id)`,
+	},
+	{
+		"7: no transfer is committed as PENDING",
+		`SELECT id::text FROM transfers WHERE state = 'PENDING'`,
+	},
+	{
+		"9: total DEBIT equals total CREDIT",
+		`SELECT 'DEBIT ' || COALESCE(SUM(amount) FILTER (WHERE type = 'DEBIT'), 0)
+		     || ', CREDIT ' || COALESCE(SUM(amount) FILTER (WHERE type = 'CREDIT'), 0)
+		 FROM ledger_entries
+		 HAVING COALESCE(SUM(amount) FILTER (WHERE type = 'DEBIT'), 0)
+		     <> COALESCE(SUM(amount) FILTER (WHERE type = 'CREDIT'), 0)`,
+	},
+	{
+		"10: every balance equals opening_balance + credits - debits",
+		`SELECT w.id FROM wallets w
+		 LEFT JOIN (SELECT wallet_id,
+		                   SUM(CASE type WHEN 'CREDIT' THEN amount ELSE -amount END) AS net
+		            FROM ledger_entries GROUP BY wallet_id) e ON e.wallet_id = w.id
+		 WHERE w.balance <> w.opening_balance + COALESCE(e.net, 0)`,
+	},
+}
+
+// checkInvariants fails t if any committed data breaks an invariant. It
+// checks the whole database: every committed transaction must leave the
+// invariants true, whichever test made it.
+func checkInvariants(t *testing.T) {
+	t.Helper()
+	for _, c := range invariantChecks {
+		rows, err := pool.Query(context.Background(), c.query)
+		if err != nil {
+			t.Errorf("invariant %s: query failed: %v", c.invariant, err)
+			continue
+		}
+		broken, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Errorf("invariant %s: read failed: %v", c.invariant, err)
+			continue
+		}
+		if len(broken) > 0 {
+			t.Errorf("invariant %s is broken by %v", c.invariant, broken)
+		}
+	}
+}
