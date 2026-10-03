@@ -83,6 +83,7 @@ func New[T Tx](repo Repository[T]) *TransferService
 | 13 | Body size limit (PR review) | Exactly 64 KiB → `201`; one byte over, padded inside or after the object → `413 REQUEST_TOO_LARGE`; over the limit and not JSON → `413` | Body read whole through `http.MaxBytesReader`, then decoded, so the size check comes first |
 | 14 | NUL in string fields (PR review) | NUL in each string field → `ErrInvalidField` (domain) and `400 INVALID_FIELD` (API), not `500` | Domain rejects U+0000 |
 | 15 | Startup schema and seed (PR review) | — (passes on arrival; shown to fail against a seed that resets balances and a schema without `IF NOT EXISTS`) | Test only |
+| 16 | Documentation fixes (PR review) | — | README decision range D-1 to D-20; spec and design say a failed `COMMIT` leaves the outcome unknown and a retry with the same key is safe |
 
 Notes:
 
@@ -93,6 +94,8 @@ Notes:
   returning `500`; with 50 concurrent requests this should fail reliably.
 - Slices 13–15 answer the Copilot review on PR #195. Each starts with a doc
   commit: requirements D-19 and D-20, the API spec, and design §5, §9, §11.
+- Slice 16 answers later reviews and is documentation only: no behavior
+  changed.
 
 **Done when** every scenario in design §11 has a test, the three checks in §1
 pass, and the README is updated.
@@ -119,6 +122,7 @@ As committed, oldest first.
 | 13 | `Add 64 KiB request body limit to the docs` → `Add failing tests for the request body limit` → `Reject request bodies over 64 KiB` |
 | 14 | `Reject NUL characters in string fields in the docs` → `Add failing tests for NUL characters in string fields` → `Reject NUL characters in string fields` |
 | 15 | `Add startup schema and seed scenario to design test strategy` → `Test that startup schema and seed are safe to reapply` |
+| 16 | `Update README decision range to D-20` → `Document unknown commit outcomes in spec and design` |
 
 ## 6. Questions Resolved During Implementation
 
